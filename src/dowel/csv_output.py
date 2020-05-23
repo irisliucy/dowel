@@ -17,6 +17,7 @@ class CsvOutput(FileOutput):
         super().__init__(file_name)
         self._writer = None
         self._fieldnames = None
+        self._filename = file_name
         self._warned_once = set()
         self._disable_warnings = False
 
@@ -30,25 +31,37 @@ class CsvOutput(FileOutput):
         if isinstance(data, TabularInput):
             to_csv = data.as_primitive_dict
 
-            if not to_csv.keys() and not self._writer:
-                return
-
             if not self._writer:
                 self._fieldnames = set(to_csv.keys())
                 self._writer = csv.DictWriter(
                     self._log_file,
                     fieldnames=self._fieldnames,
-                    extrasaction='ignore')
+                    restval='',
+                    extrasaction='raise')
                 self._writer.writeheader()
 
             if to_csv.keys() != self._fieldnames:
-                self._warn('Inconsistent TabularInput keys detected. '
-                           'CsvOutput keys: {}. '
-                           'TabularInput keys: {}. '
-                           'Did you change key sets after your first '
-                           'logger.log(TabularInput)?'.format(
-                               set(self._fieldnames), set(to_csv.keys())))
+                # close any existing log file
+                super().close()
 
+                # Read data from the existing log file once
+                with open(self._filename, 'r') as existing_file:
+                    file_data = list(csv.DictReader(existing_file))
+
+                    # Update header with new keys by union 
+                    self._fieldnames = set(self._fieldnames)| set(to_csv.keys())
+
+                    # Update the writer's header only 
+                     self._writer.fieldnames = self._fieldnames
+
+                     # Write data to file. Cell is blank for missing value of new key(s).
+                    self._log_file.seek(0)
+                    self._writer.writeheader()
+                    for row in file_data:
+                        self._writer.writerow(row)
+                        
+                    existing_file.close()
+                    
             self._writer.writerow(to_csv)
 
             for k in to_csv.keys():
